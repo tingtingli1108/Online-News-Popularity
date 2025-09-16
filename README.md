@@ -1,4 +1,4 @@
-# Lab 2: Online News Popularity
+# Online News Popularity
 
 ## 📖 Overview
 This project investigates whether publishing entertainment-focused articles on **weekends** influences their popularity on **Mashable**, as measured by article **share counts**. Using the **Online News Popularity dataset** from the [UCI Machine Learning Repository](https://archive.ics.uci.edu/dataset/332/online+news+popularity), we apply statistical modeling to assess the relationship between publication timing and article shares.
@@ -85,6 +85,6 @@ Our analysis indicates that entertainment articles published on weekends receive
 
 ## 👥 Team
 This project was created by the UC Berkeley MIDS (Master of Information and Data Science) student 
-- Agnese, Minazzo
-- Etienne, Ndedi
-- Tingting, Li
+- Agnese Minazzo
+- Etienne Ndedi
+- Tingting Li
