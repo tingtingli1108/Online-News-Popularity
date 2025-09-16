@@ -1,0 +1,356 @@
+---
+title: 'Lab 2 : Online News Popularity'
+author: "Agnese, Minazzo; Etienne, Ndedi; Tingting, Li"
+output:
+  pdf_document:
+    toc: false
+    number_sections: true
+    extra_dependencies: ["dcolumn"]
+urlcolor: blue
+editor_options: 
+  chunk_output_type: console
+---
+```{r load packages and set options, include=FALSE}
+library(car)
+library(e1071)
+library(readr)
+library(broom)
+library(tidyverse) 
+library(gt)
+library(sandwich)
+library(magrittr)
+library(lmtest)
+library(knitr)
+library(patchwork)
+library(tidyverse)
+library(formattable)
+library(reshape2)
+library(moments)
+library(ggplot2)
+library(dplyr)
+library(cowplot)
+library(gridExtra)
+library(magick)
+library(multcomp)
+library(corrplot)
+library(stargazer)
+
+theme_set(theme_bw())
+
+options(tinytex.verbose = TRUE)
+knitr::opts_chunk$set(echo=FALSE, message=FALSE)
+```
+
+
+```{r load data, include=FALSE}
+data <- read.csv('/Users/19162/Documents/Github/W203/Lab_2/OnlineNewsPopularity.csv')
+dim(data)
+```
+
+# Introduction
+The shift in news consumption patterns, as detailed in a Pew Research study\footnote{https://www.pewresearch.org/short-reads/2021/01/12/more-than-eight-in-ten-americans-get-news-from-digital-devices/}, shows over 80% of Americans now access news via digital platforms, marking a departure from traditional print media and highlighting the internet's growing influence. As per the Organization for Economic Cooperation Development (OECD) findings\footnote{https://www.oecd.org/daf/competition/competition-issues-concerning-news-media-and-digital-platforms-2021.pdf}, digital platforms have revolutionized news distribution and consumption. In this digital era, independent online news sites like Mashable are enhancing their market presence. A key strategy involves assessing whether a digital platform can maintain or increase its market power, with article categorization playing a crucial role in boosting shares and popularity. Certain categories, like entertainment, believed to be more popular, warrant specific attention. Our statistical analysis, leveraging Mashable's data, aims to answer a pivotal question:
+
+\begin{quote}
+  \textit{Does publishing entertainment-focused articles on weekends influence their popularity on Mashable, as measured by share counts?}
+\end{quote}
+
+In this study, we aim to answer the above question through an online news popularity dataset derived from the Mashable platform.
+
+# Data and Methodology
+Sourced from the UCI database, the dataset for this study contains news popularity features obtained from the Mashable internet news platform by Fernandes\footnote{K. Fernandes, P. Vinagre and P. Cortez. A Proactive Intelligent Decision Support System for Predicting the Popularity of Online News. Proceedings of the 17th EPIA 2015 - Portuguese Conference on Artificial Intelligence, September, Coimbra, Portugal.}. The dataset includes articles published from January 7th, 2013, to January 7th, 2015, with a total of 61 columns and 39,644 rows. Fernandes conducted an analysis of the HTML code of the articles, extracting 47 features. These features encompass various aspects such as the number of keywords and word count. Additionally, he generated other statistics for the articles using natural language processing (NLP), including measures of text subjectivity and sentiment polarity. In this study, our focus is on increasing the share of articles in the "Entertainment" channel, and thus, the data set was narrowed down to 61 columns and 7,057 rows.
+
+For this study, we split our data into 2 parts: an exploration set with 30\% of the data for initial exploration and model building, and a confirmation set with 70\% of the data for model confirmation and generating the final report.
+
+
+```{r get Entertainment data and split data to 30% and 70%, include=FALSE}
+entertainment <- data[data$data_channel_is_entertainment == 1, ]
+
+set.seed(33)  # Set a seed for reproducibility
+
+# Determine the number of rows for each subset
+n_ent <- nrow(entertainment)
+n_30_percent_ent <- round(0.3 * n_ent)  # 30% of the data
+n_70_percent_ent <- n_ent - n_30_percent_ent  # 70% of the data
+
+# Split data
+ent_exp <- entertainment[sample(nrow(entertainment), size = n_30_percent_ent, replace = FALSE), ]
+ent_con <- entertainment[sample(nrow(entertainment), size = n_70_percent_ent, replace = FALSE), ]
+
+
+# Verify the number of rows in each subset
+nrow(ent_exp)  # Should be approximately 30% of the data
+nrow(ent_con)  # Should be approximately 70% of the data
+dim(ent_con)
+
+
+```
+
+As our main focus is the increase in the number of shares, we examined the distribution of our dependent variable (Y), revealing a significantly right-skewed distribution (skewness: 12.04). To address this and improve the fit for our Ordinary Least Squares (OLS) model, we applied a log transformation to the shares variable. This adjustment significantly reduced the skewness to 1.44, resulting in a distribution that more closely approximates normality, albeit with a slight right skew.
+
+```{r check distribution of shares and log transformation on shares and check distribution, include=FALSE}
+
+hist(ent_con$shares)
+skewness(ent_con$shares)
+kurtosis(ent_con$shares)
+summary(ent_con$shares)
+## skewness is 12.04, kurtosis is 215.14(way more than 10 - heavy fat tail), and shares are all positive, should do a log transformation
+
+ent_con$shares_log <- log(ent_con$shares)
+hist(ent_con$shares_log)
+skewness(ent_con$shares_log) 
+kurtosis(ent_con$shares_log)
+summary(ent_con$shares_log)
+# skewness is 1.447 slightly skewed
+# kurtosis is 5.838(normal distribution is 3, shares_log is 5.838, not bad)
+```
+
+As a news website, Mashable leverages article shares as a metric for determining popularity. Our initial belief is that the timing of article publication likely impacts the share count. Based on the table below, we extracted the daily article count and corresponding share statistics. The table shows a clear trend: there is a notably higher volume of articles published during weekdays (Monday to Friday) than on weekends (Saturday and Sunday). Interestingly, despite this, articles published on weekends tend to have lower share statistics compared to those published on weekdays.
+
+To further analyze this, we compared weekdays and weekends. Surprisingly, the average article count on weekends constitutes only 36\% of the average article count on weekdays. Nevertheless, the average shares (3357.18 VS 3012.22), median shares (1600 VS 1100), and mean of log shares (7.63 VS 7.26) for weekend articles surpass those of weekday articles. This study investigates if publishing entertainment articles on weekends boosts their share counts.
+
+```{r log of shares with each day and weekday/weekends table, eval=FALSE, include=FALSE}
+## Note: To generate this table, we need kableExtra library loaded, However, rmd can't be knitted into pdf with this package. So we decid3ed to remove this package in the final report and use the readimage function to show the table.(as next code chunk)
+
+ # Analyze and format the table
+shares_by_day_con <- ent_con %>%
+   mutate(day_of_week = case_when(
+    weekday_is_monday == 1 ~ "Monday",
+    weekday_is_tuesday == 1 ~ "Tuesday",
+    weekday_is_wednesday == 1 ~ "Wednesday",
+    weekday_is_thursday == 1 ~ "Thursday",
+    weekday_is_friday == 1 ~ "Friday",
+    weekday_is_saturday == 1 ~ "Saturday",
+    weekday_is_sunday == 1 ~ "Sunday"
+    )) %>%
+  group_by(day_of_week) %>%
+  summarise(
+    number_of_articles = n(),
+    total_shares = sum(shares),
+    mean_shares = round(mean(shares), 2),
+    median_shares = round(median(shares), 2),
+    mean_log_shares = round(mean(log(shares)), 2),
+    .groups = 'drop'
+    ) %>%
+  arrange(match(day_of_week, c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")))
+
+  # Summarize for weekdays and weekends
+  weekday_summary <- ent_con %>%
+    filter(weekday_is_monday == 1 | weekday_is_tuesday == 1 | weekday_is_wednesday == 1 | 
+           weekday_is_thursday == 1 | weekday_is_friday == 1) %>%
+    summarise(
+      day_of_week = "Weekdays",
+      number_of_articles = n(),
+      total_shares = sum(shares),
+      mean_shares = round(mean(shares), 2),
+      median_shares = round(median(shares), 2),
+      mean_log_shares = round(mean(log(shares)), 2)
+    )
+
+  weekend_summary <- ent_con %>%
+    filter(weekday_is_saturday == 1 | weekday_is_sunday == 1) %>%
+    summarise(
+      day_of_week = "Weekends",
+      number_of_articles = n(),
+      total_shares = sum(shares),
+      mean_shares = round(mean(shares), 2),
+      median_shares = round(median(shares), 2),
+      mean_log_shares = round(mean(log(shares)), 2)
+    )
+
+  # Create a separator row
+  separator_row <- data.frame(
+    day_of_week = "---",  # Placeholder or empty string
+    number_of_articles = "---",
+    total_shares = "---",
+    mean_shares = "---",
+    median_shares = "---",
+    mean_log_shares = "---"
+  )
+
+  # Append summaries and separator to the main table
+  final_table <- rbind(
+    shares_by_day_con, 
+    separator_row, 
+    weekday_summary, 
+    weekend_summary
+  )
+
+  # Create a formatted table with bootstrap styling
+  final_table_formatted <- kable(final_table, format = "html", 
+                                 caption = "Shares Analysis for Entertainment Channel by Day of Week and Weekday/Weekend Summary") %>%
+    kable_styling(
+      bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+      full_width = F, font_size = 12, position = "center"
+    ) %>%
+    row_spec(0:dim(final_table)[1], color = "#36454F")
+
+  # Print the formatted table
+  #final_table_formatted
+
+```
+
+```{r table output, echo=FALSE, fig.height = 3, fig.width = 5}
+image1 <- image_read("/Users/19162/Documents/Github/W203/Lab_2/report.png")
+image1
+```
+
+Therefore we created our regression model as follows, where $\beta_1$ represents the increase in log of shares if articles are published on weekends, $\epsilon$ is the residual that captures the difference between the predicted value and the real world value.
+
+$$
+  log\_share =\beta_0 + \beta_1\cdot (is\_weekend) + \epsilon
+$$
+
+# Results
+Table 1 shows the results of three representative regressions. By comparing the adjusted R-squared and the result of the F-test, the best-performing model is Model_3. To ensure that our model is sound, and that we could use statistical guarantees, we tested the 5 Classical Linear Model (CLM) assumptions.
+```{r model 1-3 and F test, include=FALSE}
+
+model_1 = lm(shares_log ~ is_weekend , data = ent_con)
+summary(model_1)
+se_model_1 <- model_1 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+model_2 = lm(shares_log ~ is_weekend + global_subjectivity + num_keywords^2 + self_reference_avg_sharess, data = ent_con)
+summary(model_2)
+se_model_2 <- model_2 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+model_3 = lm(shares_log ~ is_weekend + global_subjectivity + num_keywords^2 + self_reference_avg_sharess+ num_hrefs^2 + num_imgs^2 + kw_avg_avg, data = ent_con)
+summary(model_3)
+se_model_3 <- model_3 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+#F test #
+anova(model_1, model_2, test='F')
+anova(model_2, model_3, test='F')
+
+model_3
+```
+
+```{r table2, stargazer-output, results='asis', echo=FALSE}
+
+stargazer(model_1, model_2, model_3, 
+          type = 'latex', 
+          title = "Regression Results",
+          dep.var.caption = "Output Variable: Log of Shares",
+          dep.var.labels = "",
+          se = list(se_model_1, se_model_2, se_model_3),
+          star.cutoffs = c(0.05, 0.01, 0.001),
+          covariate.labels = c("$\\text{Weekend}$", 
+                               "$\\text{Subjectivity of Content}$", 
+                               "$\\text{Number of Keywords Squared}$", 
+                               "$\\text{Avg. Shares of Referenced Articles in Mashable}$", 
+                               "$\\text{Number of Links Squared}$", 
+                               "$\\text{Number of Images Squared}$", 
+                               "$\\text{Avg. Shares of Average Keywords}$"),
+          header = FALSE,
+          align = TRUE,
+          add.lines = list(
+            # Add any additional lines you need. For example:
+            c("Custom Note 1", "", "", ""), 
+            c("Custom Note 2", "", "", ""),
+            "\\hline"
+          ),
+          omit.stat = c("LL", "f"), 
+          notes.append = FALSE,
+          #digits = 2,
+          notes = "\\parbox[t]{7cm}{Note: *** p<0.001, ** p<0.01, * p<0.05.}"
+          )
+```
+
+First, considering the i.i.d. assumption, our dataset comprises all articles published from 2013 to 2015, making it population data within this timeframe. While there may be instances of news influencing each other as creators imitate the most popular articles, we can still consider our data to mostly meet the i.i.d. assumption.
+
+Second, regarding the assumption of no perfect collinearity, the VIF test was performed. The results indicate that none of the variables used in Model_3 have particularly high VIF values. All the VIF values are close to 1, suggesting that there is no evidence of problematic multicollinearity among the predictors.
+
+```{r CLM Assumption:  No Perfect Collinearity, include=FALSE}
+# Calculate Variance Inflation Factors
+vif_values <- vif(model_3)
+# Display the VIF values
+vif_values
+```
+
+Third, concerning the assumption of linearity in the conditional expectation, we plotted the predicted values and residuals of Model_3. As shown in Figure 1, even with the quadratic transformation of our feature in the model, it is still overestimating for low values and underestimating for high values. This suggests that the assumption of linearity in the conditional expectation is not met
+
+Fourth, regarding the assumption of constant error variance, we performed the Breusch-Pagan test. The test statistic (BP) is 230.98 with a p-value less than 2.2e-16, indicating strong evidence of heteroscedasticity in Model_3. Additionally, from Figure 1, as the fitted values increase, the variance of the residuals significantly differs on the left side. We can conclude that the data doesn't follow homoscedastic errors. However, this issue was addressed by performing heteroscedasticity-robust standard errors.
+
+```{r constant error variance, include=FALSE}
+# Display the Breusch-Pagan values
+bptest(model_3)
+```
+
+Fifth, regarding the assumption of normally distributed errors, by examining the histogram(Figure 2) and Q-Q plot(Figure 3) of residuals, the distribution appears right-skewed with fat tails. Furthermore, we calculated the skewness as 1.36 and kurtosis as 6, indicating that it doesn't meet the assumption of normally distributed errors.
+
+In the evaluation of influential data points, Figure 4 illustrates Cook's distance for each observation in the regression model. Most points are clustered near zero, however, there are a few notable exceptions that stand out due to their higher Cook's distance values and warrant closer examination.
+
+Based on the above evaluation of the CLM assumptions, we find that we satisfy assumptions 1 and 2, indicating compliance with the assumption of a large sample linear model. However, assumptions 3 to 5 are not met, suggesting that our model may be biased and exhibit significant variance.
+
+```{r model_plots, echo=FALSE, fig.height = 3, fig.width = 8 }
+# Set up the plotting area for a 2*2 grid of plots
+par(mfrow = c(1, 4))
+
+# Plot 1: Residuals vs Fitted with adjusted margins
+par(mar = c(4.1, 4.1, 4.1, 1.1)) # To ddjust the top margin
+plot(model_3, which = 1, col = rgb(0, 0, 0, 0.2), 
+     main = "Figure 1: Residuals vs Fitted", cex.main = 0.9)
+
+# Plot 2: Histogram of Residuals with default margins
+par(mar = c(4.1, 4.1, 2.1, 1.1)) # Reset to default
+hist(model_3$residuals, breaks = 'Scott', 
+     main = "Figure 2: Histogram of Residuals", 
+     xlab = "Residuals", cex.main = 0.9)
+
+# Plot 3: Q-Q Plot of Residuals with adjusted margins
+par(mar = c(4.1, 4.1, 4, 1.1)) # To adjust the top margin
+plot(model_3, which = 2, col = rgb(0, 0, 0, 0.2), 
+     main = "Figure 3: Q-Q Plot of Residuals", cex.main = 0.9)
+qqline(model_3$residuals, col = "red")
+
+# Plot 4: Cook's Distance with default margins
+par(mar = c(4.1, 4.1, 2.1, 1.1)) # Reset to default
+cooks_d <- cooks.distance(model_3)
+plot(cooks_d, type = "h", 
+     main = "Figure 4: Cook's Distance", 
+     ylab = "Cook's Distance", xlab = "Index", 
+     col = rgb(0, 0, 0, 0.5), cex.main = 0.9)
+abline(h = 4/length(cooks_d), col = "red", lwd = 2)
+
+# Reset the graphical parameters to default
+par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1)
+```
+
+```{r residual, include=FALSE}
+kurtosis(model_3$residuals )
+skewness(model_3$residuals)
+```
+
+Across the three models, the key coefficient 'is weekend' was highly statistically significant, ranging from `r min(model_1$coef[2], model_2$coef[2], model_3$coef[2]) %>% sprintf(fmt = '%#.2f')` to `r max(model_1$coef[2], model_2$coef[2], model_3$coef[2]) %>% sprintf(fmt = '%#.2f')`. As the coefficient for 'is weekend' doesn't change too much across the three models, we can conclude that the estimate of the effect on "is weekend" is unbiased.  This indicates that for articles in the entertainment channel on Mashable, the shares will increase by 34% if published on the weekends compared to weekdays.
+
+However, for all our models, despite the p-value being highly significant, the adjusted R-squared is quite low. Even in the best-performing model (based on adjusted R-squared and F-test), Model_3, the adjusted R-squared is only 0.058. This suggests that our model explains only 5.8% of the variance in our Y variable and our model has quite low predictive power. As observed throughout the tests used to check for the Classical Linear Model (CLM) assumption, a significant level of variability is present.
+
+The highly significant p-value for the model prompts us to reject the null hypothesis, affirming that the model does provide a better fit than merely considering the mean of the dependent variable. Yet, the low adjusted R-squared prompts us to consider additional explanatory variables or alternative modeling techniques that may capture more of the variance in the dependent variable. It also highlights the importance of cautious interpretation of significant p-values, particularly when the overall model fit is limited. Therefore, future model refinement or the exploration of non-linear relationships might be warranted to enhance predictive accuracy and model utility.
+
+# Limitation
+**Violation of IID:** Although we argued earlier that the data mostly meets the assumption of being independent and identically distributed (IID), it must be acknowledged that articles on Mashable could potentially be interdependent due to factors such as Mashable's recommendation algorithms, shared authors, and references to each other. Additionally, the dataset spans a 2-year timeframe, implying that the sample might be drawn from different distributions, especially considering that online news tends to become more popular over time.
+
+**Omitted variables:** The popularity of news is a complex topic influenced by various features. The dataset's limitations in capturing factors affecting the popularity of Mashable's entertainment articles could lead to unexplained variance in their share counts. Key omitted variables include authors, reader demographics, the exact timing of publication, social media trends, article quality, and concurrent news events. These omissions can significantly influence share counts but are not accounted for; thus, they not only introduce bias to our estimates but also diminish the predictive power of our model.
+
+**Model limitations:** while a significant p-value indicates that the model is better than no model, the low adjusted R-squared suggests that other unknown factors might be influencing the share counts. Potentially we can acknowledge that while the weekend might be a significant predictor, it is not the only factor, and the true relationship may be more complex. Additionally, According to Figure 4, the data has some outliers which might introduce potential biases in the coefficients.
+
+# Conclusion
+This study examines whether articles published on weekends or weekdays benefit from higher shares on Mashable's entertainment channel. We found that shares increase by 34% if an article is published on the weekends compared to weekdays. However, the low adjusted R-squared values across our models suggest that while weekend publication is a significant predictor of popularity, it is far from being the sole determinant. More uncaptured features should be considered in future models.
+
+In conclusion, we recommend a cautious interpretation of the results and advocate for the use of more sophisticated models that can accommodate the multifaceted nature of online news dissemination. Future research should aim to incorporate a broader range of factors.
+
+
+
+
+
+
